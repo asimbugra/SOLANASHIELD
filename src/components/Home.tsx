@@ -1,156 +1,140 @@
+import { useNavigate } from 'react-router-dom';
 import React, { useEffect, useState } from 'react';
-import { Transaction, sendAndConfirmTransaction, PublicKey, SystemProgram, Keypair} from '@solana/web3.js';
+import { Transaction, sendAndConfirmTransaction, PublicKey, SystemProgram, Keypair } from '@solana/web3.js';
 import { devnetConnection } from '../solanaConnection';
 
-import * as buffer from "buffer";
-window.Buffer = buffer.Buffer;
+import * as buffer from 'buffer';
+import { FaUserCircle } from 'react-icons/fa';
+import './Home.css'; // CSS dosyasını import ediyoruz
 
-const Home = () => {
+window.Buffer = buffer.Buffer; // Import'lardan sonra
+
+
+const Home: React.FC = () => {
   const [balance, setBalance] = useState(0);
   const [recipientAddress, setRecipientAddress] = useState('');
-  const [amount, setAmount] = useState(0);
+  const [amount, setAmount] = useState<string>('0');
   const [publicKeyStr, setPublicKeyStr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false); // Yeni durum değişkeni: loading
+  const [loading, setLoading] = useState(false);
+  const [senderKeypair, setSenderKeypair] = useState<Keypair | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false); // Menü durumu için ekledik
 
+  const navigate = useNavigate();
 
   useEffect(() => {
-    const lamportsToSol = (lamports: number) => {
-      return lamports / 1000000000;
-    };
+    const lamportsToSol = (lamports: number) => lamports / 1_000_000_000;
 
-    const publicKeyStr = localStorage.getItem('data');
-    setPublicKeyStr(publicKeyStr);
-    console.log(publicKeyStr);
+    const userKeypairString = localStorage.getItem('userKeypair');
 
+    if (userKeypairString !== null) {
+      const userKeypairData = JSON.parse(userKeypairString);
+      const { publicKey, privateKey } = userKeypairData;
 
-    const senderPrivateKeyStr = localStorage.getItem('privatedata');
+      setPublicKeyStr(publicKey);
 
-    if (senderPrivateKeyStr !== null) {
-        // localStorage'dan özel anahtar başarıyla alındı
-        // Şimdi geri kalan kodu buraya yerleştirin
-        const base58 = require('bs58');
-    
-        // Verilen özel anahtar dizisi
-        const privateKeyString = senderPrivateKeyStr;
-    
-        // Virgülle ayrılmış string'i sayılar dizisine dönüştür
-        const numbersArray = privateKeyString.split(",").map(Number);
-    
-        // Sayılar dizisini bir Uint8Array (byte dizisi) haline getir
-        const privateKeyBytes = new Uint8Array(numbersArray);
-    
-        // Byte dizisini base58 kodlayın
-        const encodedPrivateKey = base58.encode(privateKeyBytes);
-    
-        console.log("Base58 kodlanmış özel anahtar:", encodedPrivateKey);
-    } else {
-        // localStorage'dan özel anahtar alınamadı
-        console.error("localStorage'da 'privatedata' anahtarı bulunamadı veya null döndü.");
-    }
-    
-    
-    if (senderPrivateKeyStr !== null) {
-      // Dizeyi virgüllerle ayırıp her bir elemanı onaltılık formata dönüştürüyoruz
-      const privateKeyArray = senderPrivateKeyStr.split(',').map(Number);
-      const privateKeyUint8Array = new Uint8Array(privateKeyArray);
-      
-      // fromSecretKey yöntemini kullanarak Keypair oluşturun
-      const senderKeypair = Keypair.fromSecretKey(privateKeyUint8Array);
-      console.log(senderKeypair.secretKey.toString());
-      
-      // Şimdi senderKeypair'i kullanabilirsiniz
-  } else {
-      console.error('Private key is missing from local storage');
-  }
-    // if (senderPrivateKeyStr !== null) {
-    //     // Assuming senderPrivateKeyStr is a string representing numbers separated by commas
-    //     const privateKeyNumbers = senderPrivateKeyStr.split(',').map(Number);
-    //     const privateKey = new Uint8Array(privateKeyNumbers);
-    //     console.log(privateKey.toString()); // Now privateKey can be used as needed
+      // Özel anahtarı Uint8Array'e dönüştür
+      const privateKeyUint8Array = new Uint8Array(privateKey);
 
+      // Keypair oluştur
+      const keypair = Keypair.fromSecretKey(privateKeyUint8Array);
+      setSenderKeypair(keypair);
 
+      // Bakiye bilgisini al
+      const userPublicKey = new PublicKey(publicKey);
 
-    // } else {
-    //     // Handle the case where 'privatedata' is not found in localStorage
-    //     console.error('Private key data not found in localStorage.');
-    // }
-
-    if (publicKeyStr !== null) {
-      const publicKey = new PublicKey(publicKeyStr);
-
-      devnetConnection.getBalance(publicKey)
+      devnetConnection.getBalance(userPublicKey)
         .then(balance => {
           const balanceInSol = lamportsToSol(balance);
           setBalance(balanceInSol);
         })
         .catch(error => {
-          console.error('Error fetching balance:', error);
+          console.error('Bakiye alınırken hata oluştu:', error);
         });
+    } else {
+      console.error('Kullanıcı keypair\'i localStorage\'da bulunamadı');
+      navigate('/'); // Kullanıcı giriş yapmamışsa login sayfasına yönlendir
     }
-
-    if (senderPrivateKeyStr === null) {
-      console.error('Private key is missing from local storage');
-    }
-  }, []);
+  }, [navigate]);
 
   const handleSend = async () => {
+    setLoading(true);
     try {
-        const senderPrivateKeyStr = localStorage.getItem('privatedata');
+      if (senderKeypair !== null) {
+        const recipientPublicKey = new PublicKey(recipientAddress);
 
-        if (senderPrivateKeyStr !== null) {
-            const base58 = require('bs58');
+        const lamports = parseFloat(amount) * 1_000_000_000; // SOL'den lamport'a çevir
 
-            const numbersArray = senderPrivateKeyStr.split(",").map(Number);
-            const privateKeyBytes = new Uint8Array(numbersArray);
+        const transaction = new Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: senderKeypair.publicKey,
+            toPubkey: recipientPublicKey,
+            lamports: lamports,
+          })
+        );
 
-            const encodedPrivateKey = base58.encode(privateKeyBytes);
+        const signature = await sendAndConfirmTransaction(devnetConnection, transaction, [senderKeypair]);
+        console.log('İşlem gönderildi:', signature);
 
-            console.log("Base58 kodlanmış özel anahtar:", encodedPrivateKey);
-
-            const privateKeyUint8Array = base58.decode(encodedPrivateKey);
-            const senderKeypair = Keypair.fromSecretKey(privateKeyUint8Array);
-
-            const recipientPublicKey = new PublicKey(recipientAddress);
-
-            const transaction = new Transaction().add(
-                SystemProgram.transfer({
-                    fromPubkey: senderKeypair.publicKey,
-                    toPubkey: recipientPublicKey,
-                    lamports: amount * 1000000000,
-                })
-            );
-
-            const signature = await sendAndConfirmTransaction(devnetConnection, transaction, [senderKeypair]);
-            console.log('Transaction sent:', signature);
-            // İşlem başarıyla gönderildiğinde gerekli işlemleri burada yapabilirsiniz.
-        } else {
-            console.error('Private key is missing from local storage');
-        }
+        // Bakiye bilgisini güncelle
+        const newBalance = await devnetConnection.getBalance(senderKeypair.publicKey);
+        setBalance(newBalance / 1_000_000_000);
+      } else {
+        console.error('Gönderen keypair mevcut değil');
+      }
     } catch (error) {
-        console.error('Error sending transaction:', error);
+      console.error('İşlem gönderilirken hata oluştu:', error);
+    } finally {
+      setLoading(false);
     }
-};
+  };
 
+  const toggleMenu = () => {
+    setMenuOpen(!menuOpen);
+  };
+
+  const handleLogout = () => {
+    // localStorage'dan verileri temizle
+    localStorage.removeItem('userKeypair');
+    setSenderKeypair(null);
+    setPublicKeyStr(null);
+
+    // Login sayfasına yönlendir
+    navigate('/');
+  };
 
   return (
-    <div>
-      <h1>Welcome to the Home Page!</h1>
-      <p>wallet address: {publicKeyStr}</p>
-      <p>Wallet Balance: {balance} SOL</p>
+    <div className="home-container">
+      {/* Kullanıcı simgesi ve açılır menü */}
+      <div className="user-menu">
+        <FaUserCircle className="user-icon" onClick={toggleMenu} />
+        {menuOpen && (
+          <div className="dropdown-menu">
+            <button onClick={handleLogout}>Çıkış Yap</button>
+            {/* İleride eklemek isterseniz diğer ayar seçenekleri */}
+            {/* <button onClick={handleSettings}>Ayarlar</button> */}
+          </div>
+        )}
+      </div>
+
+      <h1>Ana Sayfaya Hoş Geldiniz!</h1>
+      <p>Cüzdan Adresi: {publicKeyStr}</p>
+      <p>Cüzdan Bakiyesi: {balance} SOL</p>
       <input
         type="text"
-        placeholder="Recipient Address"
+        placeholder="Alıcının Adresi"
         value={recipientAddress}
         onChange={(e) => setRecipientAddress(e.target.value)}
       />
       <input
         type="number"
-        placeholder="Amount (in SOL)"
+        placeholder="Miktar (SOL)"
         value={amount}
-        onChange={(e) => setAmount(parseFloat(e.target.value))}
+        onChange={(e) => setAmount(e.target.value)}
       />
-      <button onClick={handleSend} disabled={loading}>Send</button> {/* Buton işlem sırasında devre dışı bırakılır */}
-      {loading && <p>Loading...</p>} {/* İşlem sırasında loading durumu gösterilir */}
+      <button onClick={handleSend} disabled={loading}>
+        Gönder
+      </button>
+      {loading && <p>İşlem gerçekleştiriliyor...</p>}
     </div>
   );
 };
